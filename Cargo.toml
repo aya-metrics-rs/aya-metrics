@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "aya-metrics",
+    "aya-metrics-common",
+    "aya-metrics-ebpf",
+    "aya-metrics-mocks",
+]
+
+[workspace.package]
+# Use a single version for all workspace members
+version = "0.2.0"
+edition = "2021"
+homepage = "https://github.com/aya-metrics-rs/aya-metrics"
+repository = "https://github.com/aya-metrics-rs/aya-metrics"
+authors = ["OliverGavin"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+aya = "~0.13"
+aya-log = "0.2"
+aya-log-common = "0.1"
+aya-ebpf = "0.1"
+
+# Keep workspace dependencies here so it is easier to increment versions in a single place
+aya-metrics-common = { version = "0.2", path = "./aya-metrics-common" }
+aya-metrics-mocks = { version = "0.2", path = "./aya-metrics-mocks" }
+

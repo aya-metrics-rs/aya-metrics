@@ -1,0 +1,16 @@
+[package]
+name = "aya-metrics-mocks"
+description = "A crude mocking library for Aya."
+keywords = ["bpf", "ebpf", "mocks", "mocking"]
+
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+aya = { workspace = true }
+aya-log = { workspace = true }
+aya-log-common = { workspace = true } # Not directly needed but see version issue in workspace

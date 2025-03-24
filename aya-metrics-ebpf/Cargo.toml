@@ -1,0 +1,20 @@
+[package]
+name = "aya-metrics-ebpf"
+description = "A metrics library for eBPF programs."
+keywords = ["bpf", "ebpf", "metrics", "telemetry"]
+
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_arch = "bpf")'.dependencies]
+aya-ebpf = { workspace = true }
+
+[dependencies]
+aya-metrics-common = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

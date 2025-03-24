@@ -1,0 +1,28 @@
+[package]
+name = "aya-metrics-common"
+description = "A metrics library for eBPF programs."
+keywords = ["bpf", "ebpf", "metrics", "telemetry"]
+
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+user = ["strum", "strum_macros"]
+bpf = []
+
+[dependencies]
+strum = { version = "0.25", optional=true }
+strum_macros = { version = "0.25", optional=true }
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+rstest = "0.16.0"
+strum = "0.25"
+strum_macros = "0.25"

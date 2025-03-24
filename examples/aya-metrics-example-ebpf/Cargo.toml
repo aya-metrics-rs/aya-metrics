@@ -1,0 +1,18 @@
+[package]
+name = "aya-metrics-example-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-metrics-example-common = { path = "../aya-metrics-example-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+aya-metrics-ebpf = { version = "0.2.0", path = "../../../aya-metrics/aya-metrics-ebpf" }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "aya-metrics-example"
+path = "src/main.rs"

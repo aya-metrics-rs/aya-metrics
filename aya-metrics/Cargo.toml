@@ -1,0 +1,36 @@
+[package]
+name = "aya-metrics"
+description = "A metrics library for eBPF programs."
+keywords = ["bpf", "ebpf", "metrics", "telemetry"]
+
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+# Make mocks available as a feature
+mocks = ["aya-metrics-mocks"]
+
+[dependencies]
+aya = { workspace = true, features=["async_tokio"] }
+aya-metrics-common = { workspace = true, features=["user"] }
+aya-metrics-mocks = { workspace = true, optional = true }
+metrics = "0.24"
+futures = "0.3.28"
+thiserror = "1.0.38"
+tokio = { version = "1.32", features = ["time"] }
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+anyhow = "1.0.93"
+serial_test = "0.10.0"
+tokio = { version = "1.32", features = ["full", "test-util"] }
+aya-metrics-mocks = { version = "0.2", path = "../aya-metrics-mocks", package = "aya-metrics-mocks" }
+# Enable mocks for tests
+aya-metrics = { path = ".", package = "aya-metrics", features = ["mocks"] }
