@@ -166,3 +166,50 @@ impl<K: Eq + Hash + Pod, V: Eq + Copy + Pod> LpmTrie<K, V> {
         Ok(())
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Array<V: Pod> {
+    inner: Vec<V>,
+    size: usize,
+    _v: core::marker::PhantomData<V>,
+}
+
+impl<V: Pod + Default> Array<V> {
+    pub fn new(size: usize) -> Self {
+        Self {
+            inner: vec![Default::default(); size],
+            size,
+            _v: core::marker::PhantomData,
+        }
+    }
+
+    pub fn set(&mut self, index: u32, value: impl Borrow<V>, _flags: u64) -> Result<(), MapError> {
+        let ind: usize = index.try_into().map_err(|_| MapError::KeyNotFound)?;
+        if ind >= self.size {
+            return Err(MapError::OutOfBounds {
+                index,
+                max_entries: self.size as u32,
+            });
+        }
+        self.inner[ind] = value.borrow().clone();
+        Ok(())
+    }
+
+    pub fn get(&self, index: &u32, _flags: u64) -> Result<V, MapError> {
+        let ind: usize = (*index).try_into().map_err(|_| MapError::KeyNotFound)?;
+        if ind >= self.size {
+            return Err(MapError::OutOfBounds {
+                index: *index,
+                max_entries: self.size as u32,
+            });
+        }
+        Ok(self.inner[ind].clone())
+    }
+}
+
+impl<V: Pod + Default> TryFrom<Map> for Array<V> {
+    type Error = MapError;
+    fn try_from(_value: Map) -> Result<Array<V>, MapError> {
+        Ok(Array::new(1))
+    }
+}
