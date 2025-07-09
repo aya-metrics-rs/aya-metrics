@@ -9,7 +9,7 @@ members = [
 
 [workspace.package]
 # Use a single version for all workspace members
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 homepage = "https://github.com/aya-metrics-rs/aya-metrics"
 repository = "https://github.com/aya-metrics-rs/aya-metrics"
