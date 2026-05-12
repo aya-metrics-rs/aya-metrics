@@ -67,21 +67,17 @@
 //!
 use std::{io, sync::Arc};
 
-#[cfg(not(feature = "mocks"))]
 use aya::Ebpf;
 use aya::{
     maps::MapError,
     util::{nr_cpus, online_cpus},
 };
 use aya_metrics_common::Meter;
-#[cfg(feature = "mocks")]
-use aya_metrics_mocks::{Ebpf, PerCpuArray};
 use futures::{lock::Mutex, stream::FuturesUnordered, StreamExt};
 use metrics::{Counter, Label, Unit};
 use thiserror::Error;
 use tokio::time::{self, Duration};
 
-#[cfg(not(feature = "mocks"))]
 type PerCpuArray<V> = aya::maps::PerCpuArray<aya::maps::MapData, V>;
 
 type AdditionalLabels = Vec<Label>;
@@ -259,7 +255,6 @@ pub enum Error {
     InvalidOnlineCpu(#[source] io::Error),
 }
 
-// Only compile mocks when testing!
 #[cfg(test)]
 mod mocks;
 
@@ -267,9 +262,13 @@ mod mocks;
 #[cfg(test)]
 mod test {
     use super::*;
-    use aya::maps::PerCpuValues;
+    use aya::sys::test_utils::{override_syscall, Syscall, bpf_cmd, mock_fd};
+    use aya::util::nr_cpus;
+    use aya_obj::generated::bpf_map_type;
     use metrics::Unit;
     use metrics::{Key, Label};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
 
     use mocks::metrics::MockRecorder;
 
@@ -277,6 +276,85 @@ mod test {
     const INTERFACE: &str = "tst0";
     const METRIC_LABEL_HOSTNAME: &str = "hostname";
     const METRIC_LABEL_INTERFACE: &str = "interface";
+
+    // Thread-local in-memory map storage: map_fd -> (index -> per_cpu_values_bytes)
+    thread_local! {
+        static MAP_STORE: RefCell<HashMap<u32, HashMap<u32, Vec<u8>>>> = RefCell::new(HashMap::new());
+    }
+
+    fn setup_map_syscalls() {
+        MAP_STORE.with(|s| s.borrow_mut().clear());
+        override_syscall(|call| match call {
+            Syscall::Ebpf { cmd: bpf_cmd::BPF_MAP_CREATE, .. } => Ok(i64::from(mock_fd())),
+            Syscall::Ebpf { cmd: bpf_cmd::BPF_MAP_LOOKUP_ELEM, attr } => {
+                let u = unsafe { &attr.__bindgen_anon_2 };
+                let map_fd = u.map_fd;
+                let key = unsafe { *(u.key as *const u32) };
+                let value_ptr = unsafe { u.__bindgen_anon_1.value } as *mut u8;
+                let nr_cpus = nr_cpus().unwrap();
+                let value_size = size_of::<u64>().next_multiple_of(8);
+                let total_size = nr_cpus * value_size;
+
+                MAP_STORE.with(|s| {
+                    let store = s.borrow();
+                    if let Some(map) = store.get(&map_fd) {
+                        if let Some(data) = map.get(&key) {
+                            unsafe {
+                                std::ptr::copy_nonoverlapping(
+                                    data.as_ptr(), value_ptr, total_size
+                                );
+                            }
+                            return Ok(0);
+                        }
+                    }
+                    // Return zeros for uninitialized entries
+                    unsafe { std::ptr::write_bytes(value_ptr, 0, total_size); }
+                    Ok(0)
+                })
+            }
+            Syscall::Ebpf { cmd: bpf_cmd::BPF_MAP_UPDATE_ELEM, attr } => {
+                let u = unsafe { &attr.__bindgen_anon_2 };
+                let map_fd = u.map_fd;
+                let key = unsafe { *(u.key as *const u32) };
+                let value_ptr = unsafe { u.__bindgen_anon_1.value } as *const u8;
+                let nr_cpus = nr_cpus().unwrap();
+                let value_size = size_of::<u64>().next_multiple_of(8);
+                let total_size = nr_cpus * value_size;
+
+                let data = unsafe { std::slice::from_raw_parts(value_ptr, total_size).to_vec() };
+                MAP_STORE.with(|s| {
+                    s.borrow_mut()
+                        .entry(map_fd)
+                        .or_default()
+                        .insert(key, data);
+                });
+                Ok(0)
+            }
+            Syscall::Ebpf { .. } => Ok(0),
+            _ => Ok(0),
+        });
+    }
+
+    fn new_per_cpu_array(max_entries: u32) -> PerCpuArray<u64> {
+        setup_map_syscalls();
+        let obj = aya_obj::Map::Legacy(aya_obj::maps::LegacyMap {
+            def: aya::bpf_map_def {
+                map_type: bpf_map_type::BPF_MAP_TYPE_PERCPU_ARRAY as u32,
+                key_size: size_of::<u32>() as u32,
+                value_size: size_of::<u64>() as u32,
+                max_entries,
+                ..Default::default()
+            },
+            inner_def: None,
+            section_index: 0,
+            section_kind: aya_obj::EbpfSectionKind::Maps,
+            data: Vec::new(),
+            symbol_index: None,
+        });
+        let map_data = aya::maps::MapData::create(obj, "test_map", None).unwrap();
+        let map = aya::maps::Map::PerCpuArray(map_data);
+        aya::maps::PerCpuArray::try_from(map).unwrap()
+    }
 
     #[derive(Copy, Clone, Debug)]
     enum MockCounter {
@@ -317,7 +395,12 @@ mod test {
         let recorder = MockRecorder::new();
         let _guard = metrics::set_default_local_recorder(&recorder);
 
-        let metrics = EbpfMetrics::new(&mut Ebpf {}, vec![get_packets_metric()], Duration::from_secs(60))?;
+        let per_cpu_array = new_per_cpu_array(1);
+        let metrics = EbpfMetrics {
+            counters: per_cpu_array,
+            metrics: vec![get_packets_metric()],
+            period: Duration::from_secs(60),
+        };
         tokio::spawn(async move { metrics.run().await });
 
         // Give the task a chance to run
@@ -331,9 +414,9 @@ mod test {
 
     #[tokio::test(start_paused = true)]
     async fn test_run_failure_when_empty_map() {
-        let empty_per_cpu_array = PerCpuArray::new(0, 0u64);
+        let per_cpu_array = new_per_cpu_array(0);
         let metrics = EbpfMetrics {
-            counters: empty_per_cpu_array,
+            counters: per_cpu_array,
             metrics: vec![get_packets_metric()],
             period: Duration::from_secs(60),
         };
@@ -347,13 +430,35 @@ mod test {
             .expect_err("Expected error opening metric array");
     }
 
+    /// Helper to write per-cpu values directly into the map store.
+    fn write_map_value(index: u32, value: u64) {
+        let nr_cpus = nr_cpus().unwrap();
+        let value_size = size_of::<u64>().next_multiple_of(8);
+        let total_size = nr_cpus * value_size;
+        let mut data = vec![0u8; total_size];
+        for i in 0..nr_cpus {
+            let offset = i * value_size;
+            data[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
+        }
+        // Use the mock_fd value as the map_fd key
+        let map_fd = aya::sys::test_utils::mock_fd() as u32;
+        MAP_STORE.with(|s| {
+            s.borrow_mut()
+                .entry(map_fd)
+                .or_default()
+                .insert(index, data);
+        });
+    }
+
     #[tokio::test(start_paused = true)]
     async fn test_emit_metrics_registers_counters() -> Result<(), anyhow::Error> {
         let recorder = MockRecorder::new();
         let _guard = metrics::set_default_local_recorder(&recorder);
 
+        let per_cpu_array = new_per_cpu_array(1);
+
         tokio::spawn(EbpfMetrics::emit_metrics(
-            Arc::new(Mutex::new(PerCpuArray::new(1, 0u64))),
+            Arc::new(Mutex::new(per_cpu_array)),
             get_packets_metric(),
             Duration::from_secs(60),
         ));
@@ -372,10 +477,10 @@ mod test {
         let recorder = MockRecorder::new();
         let _guard = metrics::set_default_local_recorder(&recorder);
 
-        let mut per_cpu_array = PerCpuArray::new(1, 0u64);
+        let per_cpu_array = new_per_cpu_array(1);
 
         tokio::spawn(EbpfMetrics::emit_metrics(
-            Arc::new(Mutex::new(per_cpu_array.clone())),
+            Arc::new(Mutex::new(per_cpu_array)),
             get_packets_metric(),
             Duration::from_secs(60),
         ));
@@ -385,8 +490,8 @@ mod test {
         // Validate the initial registration and increment (time=0s)
         expect_counters(&recorder, 0)?;
 
-        // Update the counters
-        per_cpu_array.set(0, PerCpuValues::try_from(vec![42u64; nr_cpus().map_err(|(_, err)| err)?])?, 0)?;
+        // Update the counters directly in the map store
+        write_map_value(0, 42);
         // Time travel 60 seconds forward!
         time::advance(Duration::from_secs(60)).await;
         // Give the task a chance to run
@@ -395,7 +500,7 @@ mod test {
         expect_counters(&recorder, 42)?;
 
         // Update the counters
-        per_cpu_array.set(0, PerCpuValues::try_from(vec![50u64; nr_cpus().map_err(|(_, err)| err)?])?, 0)?;
+        write_map_value(0, 50);
         // Time travel 60 seconds forward!
         time::advance(Duration::from_secs(60)).await;
         // Give the task a chance to run
