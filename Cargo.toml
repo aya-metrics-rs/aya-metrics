@@ -4,7 +4,6 @@ members = [
     "aya-metrics",
     "aya-metrics-common",
     "aya-metrics-ebpf",
-    "aya-metrics-mocks",
 ]
 
 [workspace.package]
@@ -17,12 +16,12 @@ authors = ["OliverGavin"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-aya = "~0.13"
-aya-log = "0.2"
-aya-log-common = "0.1"
+aya = { path = "../aya/aya", version = "~0.13" }
+aya-obj = { path = "../aya/aya-obj" }
+aya-log = { path = "../aya/aya-log" }
+aya-log-common = { path = "../aya/aya-log-common" }
 aya-ebpf = "0.1"
 
 # Keep workspace dependencies here so it is easier to increment versions in a single place
 aya-metrics-common = { version = "0.2", path = "./aya-metrics-common" }
-aya-metrics-mocks = { version = "0.2", path = "./aya-metrics-mocks" }
 
