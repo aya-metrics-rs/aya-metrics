@@ -29,4 +29,3 @@ anyhow = "1.0.93"
 serial_test = "0.10.0"
 tokio = { version = "1.32", features = ["full", "test-util"] }
 aya = { workspace = true, features = ["test-utils"] }
-aya-obj = { workspace = true }
